@@ -1,40 +1,27 @@
 import cv2
 import numpy as np
 import os
-import pytesseract  # Still needed for game result
+import pytesseract
 import json
 
-# from thefuzz import fuzz # --- REMOVED --- No longer needed for names
-
-# --- ACTION REQUIRED: CONFIRM/EDIT THIS LIST ---
-# These are the exact, correct names of you and your friends.
-# The filenames in `name_templates` must match these names (e.g., "JISOO.png")
 KNOWN_PLAYERS = ["RETRAC", "JISOO", "SAMPHIL"]
 # ----------------------------------------------------
 
-# --- FINAL CONFIGURATION ---
-SCOREBOARD_PATH = "nepal_score.png"
+# --- CONFIGURATION ---
+SCOREBOARD_PATH = "scoreboards/samoa_score.png"
 HERO_TEMPLATES_PATH = "hero_templates/"
 MAP_TEMPLATES_PATH = "map_templates/"
 NAME_TEMPLATES_PATH = "name_templates/"  # --- NEW ---
 
-# --- FINAL TUNED PARAMETERS ---
+# --- PARAMETERS ---
 MAP_CONFIDENCE_THRESHOLD = 0.80
 HERO_DETECTION_THRESHOLD = 0.70
-# --- NEW --- Threshold for matching a player name template
-NAME_DETECTION_THRESHOLD = (
-    0.85  # Name templates are very consistent, so we can use a higher threshold
-)
-
-# --- REMOVED --- The preprocess and fuzzy match functions are no longer needed for player names
-# def preprocess_for_ocr(image): ...
-# def find_best_match(ocr_name, known_names, min_score): ...
+NAME_DETECTION_THRESHOLD = 0.85
 
 
-# --- MODIFIED FUNCTION ---
 def find_heroes_in_roi(roi, hero_templates, threshold):
     """
-    Finds heroes and now PRINTS the confidence score for every check.
+    Finds heroes and prints the confidence score for every check.
     """
     found_heroes = []
     roi_h, roi_w = roi.shape[:2]
@@ -66,36 +53,29 @@ def find_heroes_in_roi(roi, hero_templates, threshold):
     return found_heroes
 
 
-# --- NEW FUNCTION (MODIFIED WITH DEBUG INFO) ---
 def find_known_players_in_roi(roi, name_templates, threshold):
     """
     Finds all occurrences of known player names using template matching.
-    This is much more reliable than OCR for a fixed set of names.
-    Now prints the best match score for every template checked for debugging.
     """
     found_players = []
-    # We use a grayscale version of the ROI for matching
     roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
     for name, template in name_templates.items():
         if template is None:
             print(f"  - Skipping template for '{name}' as it could not be loaded.")
             continue
-        # Templates should also be grayscale
+
         template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
         w, h = template_gray.shape[::-1]
 
         res = cv2.matchTemplate(roi_gray, template_gray, cv2.TM_CCOEFF_NORMED)
 
-        # --- NEW DEBUG INFO ---
         # Find the single best match score for this template to print it, just like for heroes/maps.
         _min_val, max_val, _min_loc, _max_loc = cv2.minMaxLoc(res)
         print(f"  - Checking for '{name:<12}' | Best match score: {max_val:.2f}")
 
-        # Find all locations that actually exceed the threshold
         locs = np.where(res >= threshold)
 
-        # Store initial detections with their scores
         detections = []
         for pt in zip(*locs[::-1]):  # switch x and y
             score = res[pt[1], pt[0]]
@@ -103,9 +83,7 @@ def find_known_players_in_roi(roi, name_templates, threshold):
 
         # Non-maximum suppression: If multiple detections are too close, keep only the best one.
         suppressed_detections = []
-        detections.sort(
-            key=lambda x: x[2], reverse=True
-        )  # Sort by score, highest first
+        detections.sort(key=lambda x: x[2], reverse=True)
 
         for x, y, score in detections:
             is_close = False
@@ -116,7 +94,6 @@ def find_known_players_in_roi(roi, name_templates, threshold):
             if not is_close:
                 suppressed_detections.append((x, y, score))
 
-        # Print detailed info for each match that was kept after suppression
         if suppressed_detections:
             for x, y, score in suppressed_detections:
                 # Store the name, its y-coordinate (for sorting), and the x-coordinate
@@ -128,7 +105,6 @@ def find_known_players_in_roi(roi, name_templates, threshold):
     return found_players
 
 
-# --- NEW FUNCTION ---
 def find_best_map_match(map_roi, map_templates, threshold):
     """
     Finds the single best map match and prints its confidence.
@@ -159,7 +135,6 @@ def find_best_map_match(map_roi, map_templates, threshold):
         return "Unknown"
 
 
-# --- HEAVILY MODIFIED FUNCTION ---
 def analyze_scoreboard(scoreboard_img_path):
     if not os.path.exists(scoreboard_img_path):
         print(f"Error: Scoreboard image not found at {scoreboard_img_path}")
@@ -184,14 +159,14 @@ def analyze_scoreboard(scoreboard_img_path):
         for p in os.listdir(HERO_TEMPLATES_PATH)
         if p.endswith(".png")
     }
-    # --- NEW --- Load name templates
+
     name_templates = {
         name: cv2.imread(os.path.join(NAME_TEMPLATES_PATH, f"{name}.png"))
         for name in KNOWN_PLAYERS
     }
 
     # Define Regions of Interest (ROIs)
-    # Note: These might need slight tweaking if your name templates change the required area
+    # Note: These might need slight tweaking
     roi_coords = {
         "map": (1515, 291, 2205, 738),
         "result": (1556, 773, 1770, 847),
@@ -244,7 +219,7 @@ def analyze_scoreboard(scoreboard_img_path):
     team1_heroes_sorted = sorted(team1_heroes_found, key=lambda item: item[2])
     team2_heroes_sorted = sorted(team2_heroes_found, key=lambda item: item[2])
 
-    # --- 3. DETECT GAME RESULT (Still uses OCR) ---
+    # --- 3. DETECT GAME RESULT ---
     print("\n--- TEXT RECOGNITION (OCR for Game Result) ---")
     try:
         result_text = (
@@ -260,7 +235,7 @@ def analyze_scoreboard(scoreboard_img_path):
         print(f"\n--- OCR FAILED --- \nAn error occurred: {e}")
         match_result = "OCR_FAILED"
 
-    # --- 4. DETECT PLAYER NAMES (NEW METHOD) ---
+    # --- 4. DETECT PLAYER NAMES ---
     print("\n--- PLAYER NAME DETECTION (Template Matching) ---")
     print("--- Detecting in Team 1 ---")
     team1_players_found = find_known_players_in_roi(
@@ -290,16 +265,10 @@ def analyze_scoreboard(scoreboard_img_path):
         f"Found {len(team2_players)} known player names and {len(team2_heroes_sorted)} hero icons for Team 2."
     )
 
-    # This approach only finds known players. We'll match them with the heroes.
-    # We now need a more robust way to pair players with heroes.
-    # We can associate a hero with a player if their y-coordinates are close.
-
     print("\n--- Pairing Players with Heroes ---")
 
     for player in team1_players_sorted:
         # Find the hero icon that is vertically closest to this player's name
-        # The hero ROI and name ROI have different y-offsets, so we find the hero whose
-        # y-coord in its local ROI is closest to the player's y-coord in their local ROI.
         closest_hero = min(team1_heroes_sorted, key=lambda h: abs(h[2] - player["y"]))
         final_data["team1"].append(
             {"player_name": player["name"], "hero": closest_hero[0].title()}
